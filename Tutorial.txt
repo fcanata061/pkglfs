@@ -1,0 +1,185 @@
+==============================
+Tutorial Completo – Sistema de Compilação e Gerenciamento de Pacotes Linux
+==============================
+
+1️⃣ Pré-requisitos
+
+Certifique-se de ter no seu sistema Linux:
+- bash, curl, tar, unzip, patch, make, gcc/clang
+- fakeroot para instalar pacotes em diretórios temporários
+- sudo para remover arquivos do sistema (quando necessário)
+
+---
+
+2️⃣ Estrutura de diretórios recomendada
+
+Escolha um diretório principal para o ambiente de trabalho, por exemplo $HOME/work:
+
+$HOME/
+└── work/
+    ├── pkg/             # Diretório temporário de instalação via fakeroot
+    ├── pkgs/            # Pacotes tar.gz gerados
+    ├── logs/            # Logs detalhados de compilação
+    ├── sources/         # Downloads das fontes
+    └── patch/           # Patches por pacote
+$HOME/recipes/
+├── base/
+│   ├── pacote1/build.sh
+│   └── pacote2/build.sh
+├── x11/
+├── extra/
+└── desktop/
+
+> Cada pacote tem seu próprio subdiretório com build.sh
+
+---
+
+3️⃣ Variáveis de ambiente
+
+No seu ~/.bashrc ou ~/.profile defina:
+
+export WORK="$HOME/work"
+export SOURCES="$WORK/sources"
+export PATCH="$WORK/patch"
+export PKG="$WORK/pkg"
+export REPO="$HOME/recipes"
+export PREFIX="/usr/local"
+export PARALLEL=4  # Número de jobs paralelos para build
+
+Carregue as variáveis:
+
+source ~/.bashrc
+
+---
+
+4️⃣ Arquivos principais
+
+4.1 pkg-cli.sh
+
+- CLI completo para compilar, instalar, remover pacotes
+- Suporta:
+    - install <receita|subdiretorio>
+    - remove <receita|subdiretorio>
+    - build-only <receita|subdiretorio> (compila sem instalar)
+    - build-all (compila e instala todas as receitas)
+    - rebuild-system (recompila todo o sistema sem instalar)
+    - clean-pkgs (limpa diretórios temporários e tarballs)
+    - list (lista pacotes instalados)
+    - remove-orphans (remove pacotes órfãos)
+- Mantém logs em $WORK/logs
+- Gera tarballs em $WORK/pkgs
+- Usa fakeroot para instalação em $PKG
+
+4.2 Estrutura de build.sh (exemplo de receita)
+
+#!/bin/bash
+NAME="pacote1"
+VERSION="1.0"
+URL="https://exemplo.com/pacote1-1.0.tar.gz"
+
+build() {
+    ./configure --prefix=$PREFIX
+    make -j$PARALLEL
+    make install DESTDIR="$DESTDIR"
+}
+
+remove() {
+    # comandos pós-removal, se necessário
+    true
+}
+
+- Cada receita define NAME, VERSION, URL, build() e remove()
+- Patches são aplicados se houver em $PATCH/<pacote>/*.patch
+
+---
+
+5️⃣ Comandos principais do CLI
+
+1. Instalar um pacote específico:
+
+./pkg-cli.sh install $REPO/base/pacote1/build.sh
+
+2. Instalar todos os pacotes de um diretório:
+
+./pkg-cli.sh install $REPO/base
+
+3. Compilar sem instalar (build-only):
+
+./pkg-cli.sh build-only $REPO/base/pacote1/build.sh
+
+4. Recompilar todo o sistema (build-only para todas receitas):
+
+./pkg-cli.sh rebuild-system
+
+5. Compilar e instalar todas as receitas:
+
+./pkg-cli.sh build-all
+
+6. Remover pacote:
+
+./pkg-cli.sh remove $REPO/base/pacote1/build.sh
+
+7. Limpar diretórios temporários e tarballs:
+
+./pkg-cli.sh clean-pkgs
+
+8. Listar pacotes instalados:
+
+./pkg-cli.sh list
+
+9. Remover pacotes órfãos:
+
+./pkg-cli.sh remove-orphans
+
+---
+
+6️⃣ Funcionalidades avançadas
+
+- Spinner para longas operações
+- Cores na saída (verde = sucesso, amarelo = alerta, azul = info, vermelho = erro)
+- Gerenciamento de dependências:
+    - add_dependency "pacote" "dep1 dep2 ..."
+    - install_dependencies "pacote" instala dependências automaticamente
+- Arquivo de pacotes instalados: $HOME/.pkg_installed.list
+- Logs detalhados por pacote: $WORK/logs/<pacote>-<versão>.log
+- Tarballs de pacotes: $WORK/pkgs/<pacote>-<versão>.tar.gz
+
+---
+
+7️⃣ Passo a passo de uso
+
+1. Configure diretórios e variáveis de ambiente
+2. Crie $REPO com subdiretórios (base, x11, extra, desktop)
+3. Coloque cada pacote em sua pasta com build.sh
+4. Opcional: coloque patches em $PATCH/<pacote>/
+5. Rodar instalação de pacotes:
+
+./pkg-cli.sh install $REPO/base/pacote1/build.sh
+
+6. Rodar build-only para testar compilação:
+
+./pkg-cli.sh build-only $REPO/base/pacote1/build.sh
+
+7. Recompilar todo o sistema:
+
+./pkg-cli.sh rebuild-system
+
+8. Remover pacotes e limpar órfãos:
+
+./pkg-cli.sh remove $REPO/base/pacote1/build.sh
+./pkg-cli.sh remove-orphans
+
+9. Verificar logs e tarballs:
+
+- Logs: $WORK/logs/<pacote>-<versão>.log
+- Tarballs: $WORK/pkgs/<pacote>-<versão>.tar.gz
+
+---
+
+✅ Pronto! Você agora tem um sistema completo para:
+
+- Compilar e instalar pacotes a partir de receitas
+- Gerenciar dependências
+- Recompilar todo o sistema
+- Remover pacotes e órfãos
+- Visualizar logs e gerar tarballs
