@@ -1,7 +1,5 @@
 #!/bin/bash
-#
 # generic-builder.sh
-#
 # CLI para compilar, empacotar e remover pacotes
 #
 
@@ -16,9 +14,10 @@ PKGS_DIR="$WORK/pkgs"
 
 mkdir -p "$LOGS" "$PKGS_DIR"
 
-# --- Função principal para processar uma receita ---
+# Função para processar uma receita
 process_recipe() {
     local recipe="$1"
+    local do_install="$2"   # se vazio -> install normal, "no-install" -> build-only
     [ -f "$recipe" ] || { echo "[ERRO] Receita não encontrada: $recipe"; return 1; }
 
     source "$recipe"
@@ -72,10 +71,18 @@ process_recipe() {
             ( cd "$PKGDIR" && find . -type f -o -type d | sort ) > "$MANIFEST"
             PKG_ARCHIVE="$PKGS_DIR/$NAME-$VERSION.tar.gz"
             tar -czf "$PKG_ARCHIVE" -C "$PKGDIR" . 2>&1 | tee -a "$log"
-
-            echo "[SUCESSO] $NAME instalado em fakeroot ($PKGDIR)" | tee -a "$log"
-            echo "[INFO] Manifesto salvo em $MANIFEST" | tee -a "$log"
-            echo "[INFO] Pacote tar.gz criado em $PKG_ARCHIVE" | tee -a "$log"
+            echo "[SUCESSO] Pacote tar.gz criado em $PKG_ARCHIVE" | tee -a "$log"
+            ;;
+        build-only)
+            echo "[INFO] Build-only de $NAME $VERSION (sem instalar) ..." | tee -a "$log"
+            download_and_extract
+            rm -rf "$PKGDIR"
+            mkdir -p "$PKGDIR"
+            bash -c "
+                set -e
+                build
+            " 2>&1 | tee -a "$log"
+            echo "[INFO] Build-only concluído para $NAME $VERSION" | tee -a "$log"
             ;;
         remove)
             echo "[INFO] Removendo $NAME ..." | tee -a "$log"
@@ -94,16 +101,14 @@ process_recipe() {
     esac
 }
 
-# --- Função para processar diretório completo ---
 process_directory() {
     local dir="$1"
     for recipe in "$dir"/*/build.sh; do
         [ -f "$recipe" ] || continue
-        process_recipe "$recipe"
+        process_recipe "$recipe" "$COMMAND"
     done
 }
 
-# --- Função build-all ---
 build_all() {
     for category in base x11 extra desktop; do
         dir="$REPO/$category"
@@ -112,7 +117,19 @@ build_all() {
     done
 }
 
-# --- Função clean-pkgs ---
+rebuild_system() {
+    echo "[INFO] Recompilando todos os pacotes instalados do sistema ..."
+    for category in base x11 extra desktop; do
+        dir="$REPO/$category"
+        [ -d "$dir" ] || continue
+        for recipe in "$dir"/*/build.sh; do
+            [ -f "$recipe" ] || continue
+            process_recipe "$recipe" "build-only"
+        done
+    done
+    echo "[SUCESSO] Recompilação do sistema concluída."
+}
+
 clean_pkgs() {
     echo "[INFO] Limpando diretórios temporários e tarballs ..."
     rm -rf "$PKG" "$PKGS_DIR"
@@ -125,12 +142,12 @@ COMMAND="$1"
 TARGET="$2"
 
 case "$COMMAND" in
-    install|remove)
+    install|remove|build-only)
         [ -z "$TARGET" ] && { echo "Falta argumento <receita|subdiretorio>"; exit 1; }
         if [ -d "$TARGET" ]; then
             process_directory "$TARGET"
         elif [ -f "$TARGET" ]; then
-            process_recipe "$TARGET"
+            process_recipe "$TARGET" "$COMMAND"
         else
             echo "[ERRO] Arquivo ou diretório não encontrado: $TARGET"; exit 1
         fi
@@ -138,11 +155,14 @@ case "$COMMAND" in
     build-all)
         build_all
         ;;
+    rebuild-system)
+        rebuild_system
+        ;;
     clean-pkgs)
         clean_pkgs
         ;;
     *)
-        echo "Uso: $0 {install|remove|build-all|clean-pkgs} <receita|subdiretorio>"
+        echo "Uso: $0 {install|remove|build-only|build-all|rebuild-system|clean-pkgs} <receita|subdiretorio>"
         exit 1
         ;;
 esac
