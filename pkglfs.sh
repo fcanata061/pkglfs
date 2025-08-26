@@ -1,4 +1,9 @@
 #!/bin/bash
+#
+# generic-builder.sh
+#
+# CLI para compilar, empacotar e remover pacotes
+#
 
 WORK=${WORK:-"$HOME/work"}
 SOURCES=${SOURCES:-"$HOME/sources"}
@@ -7,17 +12,11 @@ PKG=${PKG:-"$WORK/pkg"}
 PREFIX=${PREFIX:-"/usr/local"}
 REPO=${REPO:-"$HOME/recipes"}
 LOGS="$WORK/logs"
+PKGS_DIR="$WORK/pkgs"
 
-ACTION="$1"
-TARGET="$2"
+mkdir -p "$LOGS" "$PKGS_DIR"
 
-[ -z "$ACTION" ] || [ -z "$TARGET" ] && {
-    echo "Uso: $0 {install|remove} <receita|subdiretorio>"
-    exit 1
-}
-
-mkdir -p "$LOGS"
-
+# --- Função principal para processar uma receita ---
 process_recipe() {
     local recipe="$1"
     [ -f "$recipe" ] || { echo "[ERRO] Receita não encontrada: $recipe"; return 1; }
@@ -30,10 +29,7 @@ process_recipe() {
         mkdir -p "$WORK" "$SOURCES"
         cd "$SOURCES" || exit 1
         local file=$(basename "$URL")
-        if [ ! -f "$file" ]; then
-            echo "[INFO] Baixando $URL ..." | tee -a "$log"
-            curl -L "$URL" -o "$file" 2>&1 | tee -a "$log" || exit 1
-        fi
+        [ -f "$file" ] || curl -L "$URL" -o "$file" 2>&1 | tee -a "$log" || exit 1
 
         cd "$WORK" || exit 1
         case "$file" in
@@ -60,14 +56,13 @@ process_recipe() {
     PKGDIR="$PKG/$NAME-$VERSION"
     MANIFEST="$WORK/$NAME-$VERSION.list"
 
-    case "$ACTION" in
+    case "$COMMAND" in
         install)
             echo "[INFO] Instalando $NAME $VERSION ..." | tee -a "$log"
             download_and_extract
             rm -rf "$PKGDIR"
             mkdir -p "$PKGDIR"
 
-            echo "[INFO] Executando build no fakeroot ..." | tee -a "$log"
             fakeroot bash -c "
                 set -e
                 export DESTDIR=\"$PKGDIR\"
@@ -75,11 +70,12 @@ process_recipe() {
             " 2>&1 | tee -a "$log"
 
             ( cd "$PKGDIR" && find . -type f -o -type d | sort ) > "$MANIFEST"
-            echo "[INFO] Manifesto gerado em $MANIFEST" | tee -a "$log"
-
-            PKG_ARCHIVE="$WORK/$NAME-$VERSION.tar.gz"
+            PKG_ARCHIVE="$PKGS_DIR/$NAME-$VERSION.tar.gz"
             tar -czf "$PKG_ARCHIVE" -C "$PKGDIR" . 2>&1 | tee -a "$log"
-            echo "[SUCESSO] Pacote tar.gz criado em $PKG_ARCHIVE" | tee -a "$log"
+
+            echo "[SUCESSO] $NAME instalado em fakeroot ($PKGDIR)" | tee -a "$log"
+            echo "[INFO] Manifesto salvo em $MANIFEST" | tee -a "$log"
+            echo "[INFO] Pacote tar.gz criado em $PKG_ARCHIVE" | tee -a "$log"
             ;;
         remove)
             echo "[INFO] Removendo $NAME ..." | tee -a "$log"
@@ -97,15 +93,56 @@ process_recipe() {
             ;;
     esac
 }
-# processar diretório ou receita individual
-if [ -d "$TARGET" ]; then
-    for recipe in "$TARGET"/*/build.sh; do
+
+# --- Função para processar diretório completo ---
+process_directory() {
+    local dir="$1"
+    for recipe in "$dir"/*/build.sh; do
         [ -f "$recipe" ] || continue
         process_recipe "$recipe"
     done
-elif [ -f "$TARGET" ]; then
-    process_recipe "$TARGET"
-else
-    echo "[ERRO] Arquivo ou diretório não encontrado: $TARGET"
-    exit 1
-fi
+}
+
+# --- Função build-all ---
+build_all() {
+    for category in base x11 extra desktop; do
+        dir="$REPO/$category"
+        [ -d "$dir" ] || continue
+        process_directory "$dir"
+    done
+}
+
+# --- Função clean-pkgs ---
+clean_pkgs() {
+    echo "[INFO] Limpando diretórios temporários e tarballs ..."
+    rm -rf "$PKG" "$PKGS_DIR"
+    mkdir -p "$PKG" "$PKGS_DIR"
+    echo "[SUCESSO] Diretórios limpos."
+}
+
+# --- Interpretar comando CLI ---
+COMMAND="$1"
+TARGET="$2"
+
+case "$COMMAND" in
+    install|remove)
+        [ -z "$TARGET" ] && { echo "Falta argumento <receita|subdiretorio>"; exit 1; }
+        if [ -d "$TARGET" ]; then
+            process_directory "$TARGET"
+        elif [ -f "$TARGET" ]; then
+            process_recipe "$TARGET"
+        else
+            echo "[ERRO] Arquivo ou diretório não encontrado: $TARGET"; exit 1
+        fi
+        ;;
+    build-all)
+        build_all
+        ;;
+    clean-pkgs)
+        clean_pkgs
+        ;;
+    *)
+        echo "Uso: $0 {install|remove|build-all|clean-pkgs} <receita|subdiretorio>"
+        exit 1
+        ;;
+esac
